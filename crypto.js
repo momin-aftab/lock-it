@@ -123,7 +123,7 @@ function getBlockSize(imageHeightPixels, imageWidthPixels, preferredTargetBlockS
 /**
  * Generates random Unicode key string matching specified length.
  */
-function generateUnicodeKey(targetKeyCharacterLength) {
+function generateUnicodeKey(targetKeyCharacterLength = 64) {
     const symbolUnicodeCodePointRanges = [
         [0x1F300, 0x1F3F0], // Symbols & Pictographs
         [0x0391, 0x03C9],   // Greek Alphabet
@@ -140,10 +140,21 @@ function generateUnicodeKey(targetKeyCharacterLength) {
         }
     }
 
+    // A key length between 48 and 128 characters provides between 480 and 1280 bits of cryptographic entropy,
+    // which vastly exceeds 256-bit AES, while remaining easily copyable, readable, and responsive.
+    const practicalKeyCharacterLength = Math.min(Math.max(targetKeyCharacterLength || 64, 48), 128);
+
     const generatedKeyCharacters = [];
-    const cryptoRandomUint32Values = new Uint32Array(targetKeyCharacterLength);
-    crypto.getRandomValues(cryptoRandomUint32Values);
-    for (let characterIndex = 0; characterIndex < targetKeyCharacterLength; characterIndex++) {
+    const cryptoRandomUint32Values = new Uint32Array(practicalKeyCharacterLength);
+    
+    // Web Crypto API allows at most 65,536 bytes (16,384 Uint32 elements) per getRandomValues call.
+    const maximumUint32ChunkSize = 16384;
+    for (let chunkOffset = 0; chunkOffset < practicalKeyCharacterLength; chunkOffset += maximumUint32ChunkSize) {
+        const currentChunkSize = Math.min(maximumUint32ChunkSize, practicalKeyCharacterLength - chunkOffset);
+        crypto.getRandomValues(cryptoRandomUint32Values.subarray(chunkOffset, chunkOffset + currentChunkSize));
+    }
+
+    for (let characterIndex = 0; characterIndex < practicalKeyCharacterLength; characterIndex++) {
         const randomCharacterSelectionIndex = cryptoRandomUint32Values[characterIndex] % candidateUnicodeCharacters.length;
         generatedKeyCharacters.push(candidateUnicodeCharacters[randomCharacterSelectionIndex]);
     }
@@ -153,7 +164,7 @@ function generateUnicodeKey(targetKeyCharacterLength) {
 /**
  * Deterministically derives a Unicode key from a passphrase.
  */
-async function deriveKeyFromPassphrase(passphraseString, targetKeyCharacterLength) {
+async function deriveKeyFromPassphrase(passphraseString, targetKeyCharacterLength = 64) {
     const utf8TextEncoder = new TextEncoder();
     const encodedPassphraseBytes = utf8TextEncoder.encode(passphraseString);
     
@@ -170,15 +181,18 @@ async function deriveKeyFromPassphrase(passphraseString, targetKeyCharacterLengt
         }
     }
 
+    // Limit key expansion to 48-128 characters to keep derivation instantaneous and UI responsive
+    const practicalKeyCharacterLength = Math.min(Math.max(targetKeyCharacterLength || 64, 48), 128);
+
     const derivedUnicodeCharacters = [];
     let counterModeIteration = 0;
-    while (derivedUnicodeCharacters.length < targetKeyCharacterLength) {
+    while (derivedUnicodeCharacters.length < practicalKeyCharacterLength) {
         const chunkDataWithCounter = new Uint8Array(encodedPassphraseBytes.length + 4);
         chunkDataWithCounter.set(encodedPassphraseBytes);
         new DataView(chunkDataWithCounter.buffer).setUint32(encodedPassphraseBytes.length, counterModeIteration++);
         const sha256HashBuffer = await crypto.subtle.digest("SHA-256", chunkDataWithCounter);
         const sha256DigestBytes = new Uint8Array(sha256HashBuffer);
-        for (let byteOffset = 0; byteOffset < sha256DigestBytes.length && derivedUnicodeCharacters.length < targetKeyCharacterLength; byteOffset += 2) {
+        for (let byteOffset = 0; byteOffset < sha256DigestBytes.length && derivedUnicodeCharacters.length < practicalKeyCharacterLength; byteOffset += 2) {
             const symbolLookupIndex = ((sha256DigestBytes[byteOffset] << 8) | sha256DigestBytes[byteOffset + 1]) % candidateUnicodeCharacters.length;
             derivedUnicodeCharacters.push(candidateUnicodeCharacters[symbolLookupIndex]);
         }

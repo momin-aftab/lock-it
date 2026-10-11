@@ -277,7 +277,7 @@ document.addEventListener("DOMContentLoaded", () => {
     function updateKeyCounterDisplay() {
         const activeSession = getActiveSession();
         const currentUnicodeCharacterCount = Array.from(keyInput.value).length;
-        keyCharCount.textContent = `${currentUnicodeCharacterCount} chars` + (activeSession.totalGridBlocks ? ` / ${activeSession.totalGridBlocks}` : "");
+        keyCharCount.textContent = `${currentUnicodeCharacterCount} chars`;
         updateActionExecutionState();
     }
 
