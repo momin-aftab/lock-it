@@ -335,9 +335,69 @@ document.addEventListener("DOMContentLoaded", () => {
         btnAction.disabled = !(hasLoadedImage && hasValidKey);
     }
 
-    // Process uploaded file into CURRENT session only
-    function handleUploadedImageFile(selectedImageFile) {
-        if (!selectedImageFile || !selectedImageFile.type.startsWith("image/")) return;
+    // Helper to load an external script dynamically on demand (zero project file footprint)
+    function loadExternalScriptOnDemand(scriptSourceUrl) {
+        return new Promise((resolvePromise, rejectPromise) => {
+            const existingScriptTag = document.querySelector(`script[src="${scriptSourceUrl}"]`);
+            if (existingScriptTag) {
+                resolvePromise();
+                return;
+            }
+            const newlyCreatedScriptTag = document.createElement("script");
+            newlyCreatedScriptTag.src = scriptSourceUrl;
+            newlyCreatedScriptTag.onload = () => resolvePromise();
+            newlyCreatedScriptTag.onerror = (scriptLoadingError) => rejectPromise(scriptLoadingError);
+            document.head.appendChild(newlyCreatedScriptTag);
+        });
+    }
+
+    // Process uploaded file into CURRENT session only with HEIC/HEIF support
+    async function handleUploadedImageFile(selectedImageFile) {
+        if (!selectedImageFile) return;
+
+        const uploadedFileNameLower = (selectedImageFile.name || "").toLowerCase();
+        const isHeicOrHeifFormat = uploadedFileNameLower.endsWith(".heic") || 
+                                   uploadedFileNameLower.endsWith(".heif") || 
+                                   selectedImageFile.type === "image/heic" || 
+                                   selectedImageFile.type === "image/heif";
+
+        const isValidImageFile = (selectedImageFile.type && selectedImageFile.type.startsWith("image/")) || isHeicOrHeifFormat;
+        if (!isValidImageFile) return;
+
+        // 1. Attempt native browser decoding (Safari, iOS, macOS, or systems with HEIF codecs)
+        if (typeof createImageBitmap === "function") {
+            try {
+                const nativeDecodedImageBitmap = await createImageBitmap(selectedImageFile);
+                setupImageForCurrentSession(nativeDecodedImageBitmap, selectedImageFile.name);
+                return;
+            } catch (nativeBitmapDecodingError) {
+                // If native decoding failed, proceed to format-specific fallback
+            }
+        }
+
+        // 2. If it is a HEIC file and native decoding failed, load on-demand decoder
+        if (isHeicOrHeifFormat) {
+            showNotificationToast("Decoding HEIC photo client-side...", "⏳");
+            try {
+                if (typeof window.heic2any !== "function") {
+                    await loadExternalScriptOnDemand("https://cdn.jsdelivr.net/npm/heic2any@0.0.4/dist/heic2any.min.js");
+                }
+                const convertedPngBlob = await window.heic2any({
+                    blob: selectedImageFile,
+                    toType: "image/png"
+                });
+                const singlePngBlob = Array.isArray(convertedPngBlob) ? convertedPngBlob[0] : convertedPngBlob;
+                const convertedImageBitmap = await createImageBitmap(singlePngBlob);
+                setupImageForCurrentSession(convertedImageBitmap, selectedImageFile.name);
+                return;
+            } catch (heicProcessingError) {
+                console.error("HEIC decoding error:", heicProcessingError);
+                showNotificationToast("Could not decode HEIC file on this browser.", "⚠️");
+                return;
+            }
+        }
+
+        // 3. Standard web image fallback via FileReader
         const fileReader = new FileReader();
         fileReader.onload = (fileReaderEvent) => {
             const loadedHtmlImage = new Image();
@@ -348,12 +408,12 @@ document.addEventListener("DOMContentLoaded", () => {
     }
 
     // Setup loaded image into CURRENT session
-    function setupImageForCurrentSession(loadedHtmlImage, sourceFileName = "Photo") {
+    function setupImageForCurrentSession(drawableImageSource, sourceFileName = "Photo") {
         const activeSession = getActiveSession();
         activeSession.imageFileName = sourceFileName;
-        activeSession.originalImageElement = loadedHtmlImage;
-        activeSession.rawImageWidth = loadedHtmlImage.naturalWidth || loadedHtmlImage.width;
-        activeSession.rawImageHeight = loadedHtmlImage.naturalHeight || loadedHtmlImage.height;
+        activeSession.originalImageElement = drawableImageSource;
+        activeSession.rawImageWidth = drawableImageSource.naturalWidth || drawableImageSource.width;
+        activeSession.rawImageHeight = drawableImageSource.naturalHeight || drawableImageSource.height;
 
         // Calculate optimal square block size
         const calculatedOptimalBlockSize = LockItCrypto.getBlockSize(activeSession.rawImageHeight, activeSession.rawImageWidth);
