@@ -351,7 +351,7 @@ document.addEventListener("DOMContentLoaded", () => {
         });
     }
 
-    // Process uploaded file into CURRENT session only with HEIC/HEIF support
+    // Process uploaded file into CURRENT session only with HEIC/HEIF and Samsung S24 high-res support
     async function handleUploadedImageFile(selectedImageFile) {
         if (!selectedImageFile) return;
 
@@ -359,19 +359,31 @@ document.addEventListener("DOMContentLoaded", () => {
         const isHeicOrHeifFormat = uploadedFileNameLower.endsWith(".heic") || 
                                    uploadedFileNameLower.endsWith(".heif") || 
                                    selectedImageFile.type === "image/heic" || 
-                                   selectedImageFile.type === "image/heif";
+                                   selectedImageFile.type === "image/heif" ||
+                                   selectedImageFile.type === "image/heic-sequence" ||
+                                   selectedImageFile.type === "image/heif-sequence" ||
+                                   selectedImageFile.type === "image/x-heic" ||
+                                   selectedImageFile.type === "image/x-heif";
 
-        const isValidImageFile = (selectedImageFile.type && selectedImageFile.type.startsWith("image/")) || isHeicOrHeifFormat;
+        const isValidImageFile = (selectedImageFile.type && selectedImageFile.type.startsWith("image/")) || 
+                                 isHeicOrHeifFormat || 
+                                 uploadedFileNameLower.match(/\.(jpg|jpeg|png|webp|bmp|gif|heic|heif|tif|tiff)$/);
         if (!isValidImageFile) return;
 
-        // 1. Attempt native browser decoding (Safari, iOS, macOS, or systems with HEIF codecs)
+        // 1. Attempt native browser decoding with EXIF auto-orientation (Safari, iOS, macOS, Android Chrome)
         if (typeof createImageBitmap === "function") {
             try {
-                const nativeDecodedImageBitmap = await createImageBitmap(selectedImageFile);
+                const nativeDecodedImageBitmap = await createImageBitmap(selectedImageFile, { imageOrientation: "from-image" });
                 setupImageForCurrentSession(nativeDecodedImageBitmap, selectedImageFile.name);
                 return;
             } catch (nativeBitmapDecodingError) {
-                // If native decoding failed, proceed to format-specific fallback
+                try {
+                    const fallbackImageBitmap = await createImageBitmap(selectedImageFile);
+                    setupImageForCurrentSession(fallbackImageBitmap, selectedImageFile.name);
+                    return;
+                } catch (fallbackBitmapError) {
+                    // If native decoding failed, proceed to format-specific fallback
+                }
             }
         }
 
@@ -412,16 +424,36 @@ document.addEventListener("DOMContentLoaded", () => {
         const activeSession = getActiveSession();
         activeSession.imageFileName = sourceFileName;
         activeSession.originalImageElement = drawableImageSource;
-        activeSession.rawImageWidth = drawableImageSource.naturalWidth || drawableImageSource.width;
-        activeSession.rawImageHeight = drawableImageSource.naturalHeight || drawableImageSource.height;
+        
+        const rawSourceWidth = drawableImageSource.naturalWidth || drawableImageSource.width;
+        const rawSourceHeight = drawableImageSource.naturalHeight || drawableImageSource.height;
+        activeSession.rawImageWidth = rawSourceWidth;
+        activeSession.rawImageHeight = rawSourceHeight;
 
-        // Calculate optimal square block size
-        const calculatedOptimalBlockSize = LockItCrypto.getBlockSize(activeSession.rawImageHeight, activeSession.rawImageWidth);
+        // High-resolution mobile safeguard (e.g. Samsung S24 50MP/200MP or iPhone 48MP photos):
+        // Constrain working resolution to 2560px (2.5K Quad-HD) to keep GPU texture memory within mobile limits
+        // and prevent mobile browser crashes while preserving pixel-sharp clarity.
+        const maximumAllowedDimension = 2560;
+        let scaledWorkingWidth = rawSourceWidth;
+        let scaledWorkingHeight = rawSourceHeight;
+
+        if (scaledWorkingWidth > maximumAllowedDimension || scaledWorkingHeight > maximumAllowedDimension) {
+            if (scaledWorkingWidth >= scaledWorkingHeight) {
+                scaledWorkingHeight = Math.round((scaledWorkingHeight * maximumAllowedDimension) / scaledWorkingWidth);
+                scaledWorkingWidth = maximumAllowedDimension;
+            } else {
+                scaledWorkingWidth = Math.round((scaledWorkingWidth * maximumAllowedDimension) / scaledWorkingHeight);
+                scaledWorkingHeight = maximumAllowedDimension;
+            }
+        }
+
+        // Calculate optimal square block size based on working dimensions
+        const calculatedOptimalBlockSize = LockItCrypto.getBlockSize(scaledWorkingHeight, scaledWorkingWidth);
         activeSession.squareBlockDimension = calculatedOptimalBlockSize;
 
         // Clean fit to multiple of block size
-        activeSession.fittedImageWidth = Math.floor(activeSession.rawImageWidth / calculatedOptimalBlockSize) * calculatedOptimalBlockSize;
-        activeSession.fittedImageHeight = Math.floor(activeSession.rawImageHeight / calculatedOptimalBlockSize) * calculatedOptimalBlockSize;
+        activeSession.fittedImageWidth = Math.floor(scaledWorkingWidth / calculatedOptimalBlockSize) * calculatedOptimalBlockSize;
+        activeSession.fittedImageHeight = Math.floor(scaledWorkingHeight / calculatedOptimalBlockSize) * calculatedOptimalBlockSize;
         activeSession.totalGridBlocks = (activeSession.fittedImageHeight / calculatedOptimalBlockSize) * (activeSession.fittedImageWidth / calculatedOptimalBlockSize);
 
         // Offscreen canvas to capture clean ImageData
@@ -429,9 +461,13 @@ document.addEventListener("DOMContentLoaded", () => {
         offscreenCanvas.width = activeSession.fittedImageWidth;
         offscreenCanvas.height = activeSession.fittedImageHeight;
         const offscreenCanvasContext = offscreenCanvas.getContext("2d");
+        
+        offscreenCanvasContext.imageSmoothingEnabled = true;
+        offscreenCanvasContext.imageSmoothingQuality = "high";
+
         offscreenCanvasContext.drawImage(
             drawableImageSource, 
-            0, 0, activeSession.fittedImageWidth, activeSession.fittedImageHeight, 
+            0, 0, rawSourceWidth, rawSourceHeight,
             0, 0, activeSession.fittedImageWidth, activeSession.fittedImageHeight
         );
 
