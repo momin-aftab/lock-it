@@ -117,24 +117,41 @@ document.addEventListener("DOMContentLoaded", () => {
         tabDecrypt.classList.toggle("active", currentlyActiveSessionMode === "decrypt");
 
         // 2. Action CTA button label & icon
+        // 2. Action CTA button label & icon
         if (currentlyActiveSessionMode === "encrypt") {
             btnActionIcon.textContent = "🔒";
             btnActionText.textContent = "Run Photo Encryption";
-            btnGenerateKey.innerHTML = "🎲 New Key";
-            btnGenerateKey.title = "Generate a fresh key on the spot";
-            keyInput.placeholder = "Tap 'New Key' or enter key...";
+            if (activeSession.keyInputMode === "passphrase") {
+                btnGenerateKey.innerHTML = "🔑 Passphrase";
+                btnGenerateKey.title = "Passphrase mode active — type your custom phrase into the text field";
+                btnGenerateKey.disabled = true;
+                keyInput.placeholder = "Enter your secret passphrase (e.g. MySecretWord123)...";
+            } else {
+                btnGenerateKey.innerHTML = "🎲 New Key";
+                btnGenerateKey.title = "Generate a fresh key on the spot";
+                btnGenerateKey.disabled = false;
+                keyInput.placeholder = "Tap 'New Key' or enter Unicode key...";
+            }
         } else {
             btnActionIcon.textContent = "🔓";
             btnActionText.textContent = "Run Photo Decryption";
-            btnGenerateKey.innerHTML = "📋 Paste Key";
-            btnGenerateKey.title = "Paste key directly from clipboard";
-            keyInput.placeholder = "Paste the key to restore photo...";
+            if (activeSession.keyInputMode === "passphrase") {
+                btnGenerateKey.innerHTML = "📋 Paste Phrase";
+                btnGenerateKey.title = "Paste passphrase directly from clipboard";
+                btnGenerateKey.disabled = false;
+                keyInput.placeholder = "Enter the secret passphrase used to encrypt...";
+            } else {
+                btnGenerateKey.innerHTML = "📋 Paste Key";
+                btnGenerateKey.title = "Paste key directly from clipboard";
+                btnGenerateKey.disabled = false;
+                keyInput.placeholder = "Paste the Unicode key to restore photo...";
+            }
         }
 
         // 3. Radio buttons & Key Mode
         radioUnicode.checked = (activeSession.keyInputMode === "unicode");
         radioPass.checked = (activeSession.keyInputMode === "passphrase");
-        btnGenerateKey.disabled = (activeSession.keyInputMode === "passphrase" && currentlyActiveSessionMode === "encrypt");
+        copyText.textContent = (activeSession.keyInputMode === "passphrase") ? "Copy Phrase" : "Copy Key";
 
         // 4. Key Input value & masking
         keyInput.value = activeSession.keyStringValue || "";
@@ -217,15 +234,24 @@ document.addEventListener("DOMContentLoaded", () => {
     radioUnicode.addEventListener("change", () => {
         const activeSession = getActiveSession();
         activeSession.keyInputMode = "unicode";
-        btnGenerateKey.disabled = false;
+        activeSession.keyStringValue = "";
+        activeSession.derivedKeyString = null;
+        if (currentlyActiveSessionMode === "encrypt" && activeSession.totalGridBlocks > 0) {
+            activeSession.keyStringValue = LockItCrypto.generateUnicodeKey(activeSession.totalGridBlocks);
+            activeSession.isKeyMaskedWithPasswordBullets = true;
+        }
         renderSessionToDOM();
     });
 
     radioPass.addEventListener("change", () => {
         const activeSession = getActiveSession();
         activeSession.keyInputMode = "passphrase";
-        if (currentlyActiveSessionMode === "encrypt") btnGenerateKey.disabled = true;
+        activeSession.keyStringValue = "";
+        activeSession.derivedKeyString = null;
+        activeSession.isKeyMaskedWithPasswordBullets = false; // Default unmasked so user can see what they type
         renderSessionToDOM();
+        keyInput.focus();
+        showNotificationToast("Passphrase mode: Type your secret phrase below.", "🔑");
     });
 
     // Toggle Password Masking (Show / Hide Key)
@@ -296,12 +322,13 @@ document.addEventListener("DOMContentLoaded", () => {
     // Modern Copy Key Experience
     btnCopyKey.addEventListener("click", async () => {
         const activeSession = getActiveSession();
-        const keyTextToCopyToClipboard = (activeSession.keyInputMode === "passphrase" && activeSession.derivedKeyString) 
-            ? activeSession.derivedKeyString 
-            : (activeSession.keyStringValue || keyInput.value);
+        const keyTextToCopyToClipboard = (activeSession.keyStringValue || keyInput.value).trim();
             
         if (!keyTextToCopyToClipboard) {
-            showNotificationToast("No key to copy!", "⚠️");
+            showNotificationToast(
+                activeSession.keyInputMode === "passphrase" ? "No passphrase to copy!" : "No key to copy!", 
+                "⚠️"
+            );
             return;
         }
 
@@ -318,12 +345,13 @@ document.addEventListener("DOMContentLoaded", () => {
         btnCopyKey.classList.add("copied");
         copyIcon.textContent = "✓";
         copyText.textContent = "Copied!";
-        showNotificationToast(`Copied ${Array.from(keyTextToCopyToClipboard).length}-character key to clipboard!`, "📋");
+        const keyTypeLabel = (activeSession.keyInputMode === "passphrase") ? "passphrase" : "key";
+        showNotificationToast(`Copied ${keyTypeLabel} to clipboard!`, "📋");
 
         setTimeout(() => {
             btnCopyKey.classList.remove("copied");
             copyIcon.textContent = "📋";
-            copyText.textContent = "Copy Key";
+            copyText.textContent = (activeSession.keyInputMode === "passphrase") ? "Copy Phrase" : "Copy Key";
         }, 2200);
     });
 
@@ -331,7 +359,7 @@ document.addEventListener("DOMContentLoaded", () => {
     function updateActionExecutionState() {
         const activeSession = getActiveSession();
         const hasLoadedImage = !!activeSession.originalImageData;
-        const hasValidKey = keyInput.value.trim().length > 0 || (activeSession.keyInputMode === "passphrase" && !!activeSession.derivedKeyString);
+        const hasValidKey = keyInput.value.trim().length > 0;
         btnAction.disabled = !(hasLoadedImage && hasValidKey);
     }
 
@@ -481,8 +509,8 @@ document.addEventListener("DOMContentLoaded", () => {
         activeSession.gridSpecificationMessage = `Grid: ${verticalBlockCount}x${horizontalBlockCount} (${activeSession.totalGridBlocks} blks)`;
         activeSession.executionSpeedMessage = "Speed: —";
 
-        // If in Encrypt mode and no key exists, auto-generate fresh key
-        if (currentlyActiveSessionMode === "encrypt" && !activeSession.keyStringValue) {
+        // If in Encrypt mode with Unicode mode and no key exists, auto-generate fresh key
+        if (currentlyActiveSessionMode === "encrypt" && activeSession.keyInputMode === "unicode" && !activeSession.keyStringValue) {
             activeSession.keyStringValue = LockItCrypto.generateUnicodeKey(activeSession.totalGridBlocks);
             activeSession.isKeyMaskedWithPasswordBullets = true;
         }
