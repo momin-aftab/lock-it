@@ -12,7 +12,6 @@ document.addEventListener("DOMContentLoaded", () => {
 
     const dropzone = document.getElementById("dropzone");
     const fileInput = document.getElementById("fileInput");
-    const btnLoadSample = document.getElementById("btnLoadSample");
 
     const imageSpecs = document.getElementById("imageSpecs");
     const specDimensions = document.getElementById("specDimensions");
@@ -396,14 +395,6 @@ document.addEventListener("DOMContentLoaded", () => {
         showNotificationToast(`Loaded ${sourceFileName} (${activeSession.fittedImageWidth}×${activeSession.fittedImageHeight} px, ${activeSession.totalGridBlocks} blocks)`, "🖼️");
     }
 
-    // Load Sample Photo button (loads into CURRENT session)
-    btnLoadSample.addEventListener("click", () => {
-        const sampleImageElement = new Image();
-        sampleImageElement.onload = () => {
-            setupImageForCurrentSession(sampleImageElement, "SampleNature.webp");
-        };
-        sampleImageElement.src = "SampleNature.webp";
-    });
 
     // Drag and Drop
     dropzone.addEventListener("dragover", (dragEvent) => {

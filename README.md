@@ -44,7 +44,6 @@ lock-it/
 ├── style.css        # Desktop theme & modern toast styling
 ├── crypto.js        # Deterministic client-side cryptographic engine
 ├── app.js           # Two-session state controller & event orchestration
-├── SampleNature.webp# Default bundled sample image
 ├── README.md        # Documentation
 └── .gitignore       # Repository ignore rules
 ```
