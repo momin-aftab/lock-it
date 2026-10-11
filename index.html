@@ -1,0 +1,184 @@
+<!-- Lock-it | Zero-Knowledge Visual Cryptography | Made by Momin Aftab -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>Lock-it</title>
+  <meta name="author" content="Momin Aftab">
+  <meta name="description" content="Lock-it - Lightweight client-side photo encryption. Made by Momin Aftab.">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+  <!-- Retro Window Shell -->
+  <div class="window-frame">
+    <!-- Clean Classic Title Bar -->
+    <div class="window-titlebar">
+      <div class="title-text">
+        <span>🔒</span>
+        <span>Lock-it</span>
+      </div>
+      <div class="title-controls">
+        <button class="win-btn" title="Minimize">_</button>
+        <button class="win-btn" title="Maximize">□</button>
+        <button class="win-btn" title="Close">×</button>
+      </div>
+    </div>
+
+    <!-- Window Body -->
+    <div class="window-body">
+      <!-- Classic Tab Strip -->
+      <div class="tab-strip">
+        <button id="tabEncrypt" class="tab-button active">🔒 Encrypt Photo</button>
+        <button id="tabDecrypt" class="tab-button">🔓 Decrypt Photo</button>
+      </div>
+
+      <div class="content-grid">
+        <!-- Left Panel: Controls & Key -->
+        <div class="left-panel">
+          <!-- Step 1: Input -->
+          <fieldset>
+            <legend>Step 1: Photo Source</legend>
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+              <span style="font-size: 11px; color: #555;">Choose file or drag below:</span>
+              <button id="btnLoadSample" class="retro-btn" title="Load sample nature photograph">
+                ⚡ Sample Photo
+              </button>
+            </div>
+
+            <div id="dropzone" class="retro-dropzone">
+              <input type="file" id="fileInput" accept="image/*">
+              <div class="dropzone-label">📁 Drop photo here or tap to browse</div>
+              <div class="dropzone-sub">Accepts WebP, PNG, JPEG</div>
+            </div>
+
+            <!-- Specs Table -->
+            <table id="imageSpecs" class="specs-table" style="display: none;">
+              <tr>
+                <td class="label">Dimensions:</td>
+                <td id="specDimensions" class="val">—</td>
+              </tr>
+              <tr>
+                <td class="label">Block Size:</td>
+                <td id="specBlockSize" class="val">—</td>
+              </tr>
+              <tr>
+                <td class="label">Total Blocks:</td>
+                <td id="specTotalBlocks" class="val">—</td>
+              </tr>
+            </table>
+          </fieldset>
+
+          <!-- Step 2: Cryptographic Key -->
+          <fieldset>
+            <legend>Step 2: Encryption Key</legend>
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+              <div style="display: flex; gap: 8px;">
+                <label style="font-size: 11px; cursor: pointer;">
+                  <input type="radio" name="keyType" id="radioUnicode" checked> Unicode Key
+                </label>
+                <label style="font-size: 11px; cursor: pointer;">
+                  <input type="radio" name="keyType" id="radioPass"> Passphrase
+                </label>
+              </div>
+              <span id="keyCharCount" style="font-size: 11px; font-family: monospace; color: #666;">0 chars</span>
+            </div>
+
+            <!-- Masked Password Key Input with Reveal Toggle -->
+            <div class="key-input-container">
+              <input 
+                type="password" 
+                id="keyInput" 
+                class="inset-box password-key-input" 
+                placeholder="Tap 'New Key' or enter key..." 
+                autocomplete="off" 
+                spellcheck="false"
+              >
+              <button id="btnToggleMask" class="retro-btn mask-toggle-btn" title="Show / Hide Key">
+                👁️
+              </button>
+            </div>
+
+            <!-- Key Toolbar: New Key & Copy Key Only -->
+            <div class="key-toolbar">
+              <button id="btnGenerateKey" class="retro-btn" title="Generate a fresh key on the spot">
+                🎲 New Key
+              </button>
+              
+              <!-- Modern Copy Experience Button -->
+              <button id="btnCopyKey" class="retro-btn btn-copy" title="Copy unmasked key to clipboard">
+                <span id="copyIcon">📋</span> <span id="copyText">Copy Key</span>
+              </button>
+            </div>
+          </fieldset>
+
+          <!-- Action Button -->
+          <button id="btnAction" class="retro-btn retro-btn-large" disabled>
+            <span id="btnActionIcon">🔒</span>
+            <span id="btnActionText">Run Photo Encryption</span>
+          </button>
+        </div>
+
+        <!-- Right Panel: Visualizer & Downloads -->
+        <div class="right-panel">
+          <fieldset style="height: 100%; display: flex; flex-direction: column;">
+            <legend>Step 3: Preview & Output</legend>
+
+            <!-- View Toolbar -->
+            <div class="view-toolbar">
+              <div style="display: flex; gap: 4px;">
+                <button id="btnViewTransformed" class="retro-btn" style="background: #ffffff;">Result</button>
+                <button id="btnViewOriginal" class="retro-btn">Original</button>
+              </div>
+              <div>
+                <label style="font-size: 11px; cursor: pointer;">
+                  <input type="checkbox" id="chkGrid"> Show Block Grid
+                </label>
+              </div>
+            </div>
+
+            <!-- Viewport Canvas Frame -->
+            <div class="viewport-frame" id="viewport">
+              <div id="emptyNotice" class="empty-notice">
+                [ No Image Loaded ]<br>
+                Load an image using Step 1
+              </div>
+              <canvas id="mainCanvas"></canvas>
+              <canvas id="overlayCanvas"></canvas>
+            </div>
+
+            <!-- Modern Download Experience Bar -->
+            <div class="modern-download-bar">
+              <button id="btnDownloadWebP" class="modern-dl-btn" disabled>
+                <span>💾</span> Download Lossless WebP
+              </button>
+              <button id="btnDownloadPNG" class="modern-dl-btn" disabled>
+                <span>🖼️</span> Download PNG
+              </button>
+            </div>
+          </fieldset>
+        </div>
+      </div>
+
+      <!-- Classic Status Bar -->
+      <div class="window-statusbar">
+        <div id="statusMain" class="status-panel flex-1">Ready</div>
+        <div id="statusGrid" class="status-panel">Grid: —</div>
+        <div id="statusSpeed" class="status-panel">Speed: —</div>
+        <div class="status-panel">Made by Momin Aftab</div>
+        <div class="status-panel">100% Client-Side E2E</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modern Floating Toast -->
+  <div id="modernToast" class="modern-toast">
+    <span class="toast-icon">✓</span>
+    <span id="toastMessage">Copied key to clipboard!</span>
+  </div>
+
+  <script src="crypto.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
