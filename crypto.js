@@ -11,16 +11,83 @@
  * 5. Intra-Block RGB Channel Swap (Pivot Rule) + Color Masking
  */
 
-// Deterministic 32-bit PRNG (Mulberry32)
-function createPRNG(initialSeedValue) {
-    let internalSeedState = initialSeedValue >>> 0;
+// RFC 8439 ChaCha20 Quarter-Round Core Operation (256-bit state expansion)
+function chacha20QuarterRound(stateArray, indexA, indexB, indexC, indexD) {
+    stateArray[indexA] = (stateArray[indexA] + stateArray[indexB]) | 0;
+    stateArray[indexD] = stateArray[indexD] ^ stateArray[indexA];
+    stateArray[indexD] = (stateArray[indexD] << 16) | (stateArray[indexD] >>> 16);
+
+    stateArray[indexC] = (stateArray[indexC] + stateArray[indexD]) | 0;
+    stateArray[indexB] = stateArray[indexB] ^ stateArray[indexC];
+    stateArray[indexB] = (stateArray[indexB] << 12) | (stateArray[indexB] >>> 20);
+
+    stateArray[indexA] = (stateArray[indexA] + stateArray[indexB]) | 0;
+    stateArray[indexD] = stateArray[indexD] ^ stateArray[indexA];
+    stateArray[indexD] = (stateArray[indexD] << 8) | (stateArray[indexD] >>> 24);
+
+    stateArray[indexC] = (stateArray[indexC] + stateArray[indexD]) | 0;
+    stateArray[indexB] = stateArray[indexB] ^ stateArray[indexC];
+    stateArray[indexB] = (stateArray[indexB] << 7) | (stateArray[indexB] >>> 25);
+}
+
+// RFC 8439 ChaCha20 64-Byte Block Generator (256-bit security)
+function generateChaCha20Block(keyWords32Bit, blockCounter32Bit, nonceWords32Bit) {
+    const workingStateArray = new Uint32Array(16);
+    // ChaCha20 constants: "expand 32-byte k"
+    workingStateArray[0] = 0x61707865;
+    workingStateArray[1] = 0x3320646e;
+    workingStateArray[2] = 0x79622d32;
+    workingStateArray[3] = 0x6b206574;
+
+    for (let wordIndex = 0; wordIndex < 8; wordIndex++) {
+        workingStateArray[4 + wordIndex] = keyWords32Bit[wordIndex];
+    }
+    workingStateArray[12] = blockCounter32Bit >>> 0;
+    workingStateArray[13] = nonceWords32Bit[0] >>> 0;
+    workingStateArray[14] = nonceWords32Bit[1] >>> 0;
+    workingStateArray[15] = nonceWords32Bit[2] >>> 0;
+
+    const outputStateBuffer = new Uint32Array(workingStateArray);
+
+    for (let roundIndex = 0; roundIndex < 10; roundIndex++) {
+        // 4 column rounds
+        chacha20QuarterRound(outputStateBuffer, 0, 4, 8, 12);
+        chacha20QuarterRound(outputStateBuffer, 1, 5, 9, 13);
+        chacha20QuarterRound(outputStateBuffer, 2, 6, 10, 14);
+        chacha20QuarterRound(outputStateBuffer, 3, 7, 11, 15);
+        // 4 diagonal rounds
+        chacha20QuarterRound(outputStateBuffer, 0, 5, 10, 15);
+        chacha20QuarterRound(outputStateBuffer, 1, 6, 11, 12);
+        chacha20QuarterRound(outputStateBuffer, 2, 7, 8, 13);
+        chacha20QuarterRound(outputStateBuffer, 3, 4, 9, 14);
+    }
+
+    for (let wordIndex = 0; wordIndex < 16; wordIndex++) {
+        outputStateBuffer[wordIndex] = (outputStateBuffer[wordIndex] + workingStateArray[wordIndex]) >>> 0;
+    }
+    return outputStateBuffer;
+}
+
+// 256-Bit Cryptographically Secure Pseudo-Random Number Generator (ChaCha20)
+function createChaCha20CSPRNG(keyDigestBytes, nonceWordA = 0, nonceWordB = 0, nonceWordC = 0) {
+    const keyWords32Bit = new Uint32Array(keyDigestBytes.buffer, keyDigestBytes.byteOffset, 8);
+    const nonceWords32Bit = new Uint32Array([nonceWordA >>> 0, nonceWordB >>> 0, nonceWordC >>> 0]);
+    let blockCounter = 0;
+    let currentBlockBuffer = null;
+    let currentBufferIndex = 16;
+
     return function generateNextRandomFloat() {
-        internalSeedState = (internalSeedState + 0x6D2B79F5) >>> 0;
-        let mixedIntermediateValue = Math.imul(internalSeedState ^ (internalSeedState >>> 15), 1 | internalSeedState);
-        mixedIntermediateValue = (mixedIntermediateValue + Math.imul(mixedIntermediateValue ^ (mixedIntermediateValue >>> 7), 61 | mixedIntermediateValue)) ^ mixedIntermediateValue;
-        return ((mixedIntermediateValue ^ (mixedIntermediateValue >>> 14)) >>> 0) / 4294967296;
+        if (currentBufferIndex >= 16) {
+            currentBlockBuffer = generateChaCha20Block(keyWords32Bit, blockCounter++, nonceWords32Bit);
+            currentBufferIndex = 0;
+        }
+        const randomUint32 = currentBlockBuffer[currentBufferIndex++];
+        return randomUint32 / 4294967296;
     };
 }
+
+// Backward-compatible alias
+const createPRNG = createChaCha20CSPRNG;
 
 // Fisher-Yates shuffle producing Int32Array permutation
 function generatePermutation(totalElementCount, pseudoRandomGenerator) {
@@ -211,12 +278,9 @@ async function computeKeyDigest(unicodeKeyString) {
 }
 
 /**
- * Derives block transformation parameters.
+ * Derives block transformation parameters using full 256-bit ChaCha20 CSPRNG.
  */
 function deriveBlockParameters(unicodeKeyString, sha256KeyDigestBytes, totalImageBlockCount, pixelsPerSquareBlock) {
-    const digestDataView = new DataView(sha256KeyDigestBytes.buffer);
-    const masterGlobalSeed32Bit = digestDataView.getUint32(0, false);
-
     // Expand key to match totalImageBlockCount
     const expandedUnicodeCodePoints = [];
     const unicodeCharacterArray = Array.from(unicodeKeyString);
@@ -224,26 +288,37 @@ function deriveBlockParameters(unicodeKeyString, sha256KeyDigestBytes, totalImag
         expandedUnicodeCodePoints.push(unicodeCharacterArray[blockIndex % unicodeCharacterArray.length].codePointAt(0));
     }
 
-    // Inter-block permutation
-    const masterPseudoRandomGenerator = createPRNG(masterGlobalSeed32Bit);
-    const interBlockPermutationArray = generatePermutation(totalImageBlockCount, masterPseudoRandomGenerator);
+    // Inter-block spatial permutation using full 256-bit ChaCha20 CSPRNG (Nonce: "GLOB")
+    const masterChaChaPseudoRandomGenerator = createChaCha20CSPRNG(
+        sha256KeyDigestBytes, 
+        0x474C4F42, // ASCII "GLOB"
+        totalImageBlockCount >>> 0, 
+        pixelsPerSquareBlock >>> 0
+    );
+    const interBlockPermutationArray = generatePermutation(totalImageBlockCount, masterChaChaPseudoRandomGenerator);
     const invertedInterBlockPermutationArray = invertPermutation(interBlockPermutationArray);
 
-    // Per-block parameters
+    // Per-block parameters (each block has its own independent 256-bit ChaCha20 keystream)
     const perBlockPixelPermutations = [];
     const perBlockColorMaskRgb = [];
     const perBlockPivotColorSwapRules = [];
 
     for (let blockIndex = 0; blockIndex < totalImageBlockCount; blockIndex++) {
         const unicodeCharacterCodePoint = expandedUnicodeCodePoints[blockIndex];
-        const uniquePerBlockSeed = (masterGlobalSeed32Bit ^ (unicodeCharacterCodePoint * 1000003 + blockIndex * 2654435761)) >>> 0;
-        const perBlockPseudoRandomGenerator = createPRNG(uniquePerBlockSeed);
+        
+        // Block-specific 256-bit ChaCha20 CSPRNG
+        const perBlockChaChaGenerator = createChaCha20CSPRNG(
+            sha256KeyDigestBytes,
+            blockIndex >>> 0,
+            unicodeCharacterCodePoint >>> 0,
+            (blockIndex * 2654435761) >>> 0
+        );
 
-        perBlockPixelPermutations.push(generatePermutation(pixelsPerSquareBlock, perBlockPseudoRandomGenerator));
+        perBlockPixelPermutations.push(generatePermutation(pixelsPerSquareBlock, perBlockChaChaGenerator));
         perBlockColorMaskRgb.push([
-            Math.floor(perBlockPseudoRandomGenerator() * 256),
-            Math.floor(perBlockPseudoRandomGenerator() * 256),
-            Math.floor(perBlockPseudoRandomGenerator() * 256)
+            Math.floor(perBlockChaChaGenerator() * 256),
+            Math.floor(perBlockChaChaGenerator() * 256),
+            Math.floor(perBlockChaChaGenerator() * 256)
         ]);
         perBlockPivotColorSwapRules.push((unicodeCharacterCodePoint + sha256KeyDigestBytes[blockIndex % sha256KeyDigestBytes.length]) % 3);
     }
