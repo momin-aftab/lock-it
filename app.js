@@ -20,6 +20,9 @@ document.addEventListener("DOMContentLoaded", () => {
 
     const radioUnicode = document.getElementById("radioUnicode");
     const radioPass = document.getElementById("radioPass");
+    const radioStandardSecure = document.getElementById("radioStandardSecure");
+    const radioStandardFast = document.getElementById("radioStandardFast");
+    const standardBadge = document.getElementById("standardBadge");
     const keyInput = document.getElementById("keyInput");
     const btnToggleMask = document.getElementById("btnToggleMask");
     const keyCharCount = document.getElementById("keyCharCount");
@@ -48,14 +51,16 @@ document.addEventListener("DOMContentLoaded", () => {
     const statusMain = document.getElementById("statusMain");
     const statusGrid = document.getElementById("statusGrid");
     const statusSpeed = document.getElementById("statusSpeed");
+    const statusStandard = document.getElementById("statusStandard");
     const modernToast = document.getElementById("modernToast");
     const toastMessage = document.getElementById("toastMessage");
 
     // Factory for completely isolated session state
     function createSessionState(targetSessionMode) {
         return {
-            sessionMode: targetSessionMode, // 'encrypt' or 'decrypt'
-            keyInputMode: "unicode",        // 'unicode' or 'passphrase'
+            sessionMode: targetSessionMode,       // 'encrypt' or 'decrypt'
+            encryptionStandard: "secure",         // 'secure' (ChaCha20 256-bit) or 'fast' (Mulberry32 32-bit)
+            keyInputMode: "unicode",              // 'unicode' or 'passphrase'
             keyStringValue: "",
             derivedKeyString: null,
             isKeyMaskedWithPasswordBullets: true,
@@ -106,6 +111,9 @@ document.addEventListener("DOMContentLoaded", () => {
         activeSession.keyStringValue = keyInput.value;
         activeSession.isKeyMaskedWithPasswordBullets = (keyInput.type === "password");
         activeSession.isGridOverlayVisible = chkGrid.checked;
+        if (radioStandardFast) {
+            activeSession.encryptionStandard = radioStandardFast.checked ? "fast" : "secure";
+        }
     }
 
     // Restore a session's state into the DOM
@@ -146,6 +154,31 @@ document.addEventListener("DOMContentLoaded", () => {
                 btnGenerateKey.disabled = false;
                 keyInput.placeholder = "Paste the Unicode key to restore photo...";
             }
+        }
+
+        // 2.5 Standard Selector (Secure 256-Bit vs Fast 32-Bit)
+        const isFastStandard = (activeSession.encryptionStandard === "fast");
+        if (radioStandardFast && radioStandardSecure) {
+            radioStandardFast.checked = isFastStandard;
+            radioStandardSecure.checked = !isFastStandard;
+        }
+        if (standardBadge) {
+            if (isFastStandard) {
+                standardBadge.textContent = "32-Bit";
+                standardBadge.style.background = "#fef3c7";
+                standardBadge.style.color = "#b45309";
+                standardBadge.style.borderColor = "#fde68a";
+            } else {
+                standardBadge.textContent = "256-Bit";
+                standardBadge.style.background = "#e0f2fe";
+                standardBadge.style.color = "#0369a1";
+                standardBadge.style.borderColor = "#bae6fd";
+            }
+        }
+        if (statusStandard) {
+            statusStandard.textContent = isFastStandard 
+                ? "100% Client-Side 32-Bit Fast E2E" 
+                : "100% Client-Side 256-Bit E2E";
         }
 
         // 3. Radio buttons & Key Mode
@@ -229,6 +262,25 @@ document.addEventListener("DOMContentLoaded", () => {
 
     tabEncrypt.addEventListener("click", () => switchActiveSessionMode("encrypt"));
     tabDecrypt.addEventListener("click", () => switchActiveSessionMode("decrypt"));
+
+    // Standard Radio Selection (Secure vs Fast)
+    if (radioStandardSecure) {
+        radioStandardSecure.addEventListener("change", () => {
+            const activeSession = getActiveSession();
+            activeSession.encryptionStandard = "secure";
+            renderSessionToDOM();
+            showNotificationToast("Switched to Secure Standard (RFC 8439 ChaCha20 256-Bit)", "🛡️");
+        });
+    }
+
+    if (radioStandardFast) {
+        radioStandardFast.addEventListener("change", () => {
+            const activeSession = getActiveSession();
+            activeSession.encryptionStandard = "fast";
+            renderSessionToDOM();
+            showNotificationToast("Switched to Fast Standard (Mulberry32 32-Bit)", "⚡");
+        });
+    }
 
     // Key Type Radio (Unicode vs Passphrase)
     radioUnicode.addEventListener("change", () => {
@@ -623,18 +675,22 @@ document.addEventListener("DOMContentLoaded", () => {
 
         const cryptographicStartTimeMilliseconds = performance.now();
         let transformedImageDataResult;
+        const selectedStandard = activeSession.encryptionStandard || "secure";
+        const standardDisplayName = (selectedStandard === "fast") ? "Fast (32-Bit)" : "Secure (256-Bit)";
 
         if (currentlyActiveSessionMode === "encrypt") {
             transformedImageDataResult = await LockItCrypto.encryptImageData(
                 activeSession.originalImageData, 
                 activeCryptographicKeyString, 
-                activeSession.squareBlockDimension
+                activeSession.squareBlockDimension,
+                selectedStandard
             );
         } else {
             transformedImageDataResult = await LockItCrypto.decryptImageData(
                 activeSession.originalImageData, 
                 activeCryptographicKeyString, 
-                activeSession.squareBlockDimension
+                activeSession.squareBlockDimension,
+                selectedStandard
             );
         }
 
@@ -652,7 +708,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
         const completedActionVerb = (currentlyActiveSessionMode === "encrypt") ? "Encrypted" : "Decrypted";
         activeSession.statusMessage = `${completedActionVerb} ${activeSession.totalGridBlocks} blocks (100% Lossless)`;
-        activeSession.executionSpeedMessage = `Speed: ${cryptographicElapsedMilliseconds}ms`;
+        activeSession.executionSpeedMessage = `Speed: ${cryptographicElapsedMilliseconds}ms (${selectedStandard === "fast" ? "32-Bit" : "256-Bit"})`;
 
         statusMain.textContent = activeSession.statusMessage;
         statusSpeed.textContent = activeSession.executionSpeedMessage;
@@ -660,7 +716,7 @@ document.addEventListener("DOMContentLoaded", () => {
         btnDownloadWebP.disabled = false;
         btnDownloadPNG.disabled = false;
 
-        showNotificationToast(`${completedActionVerb} in ${cryptographicElapsedMilliseconds}ms!`, "⚡");
+        showNotificationToast(`${completedActionVerb} [${standardDisplayName}] in ${cryptographicElapsedMilliseconds}ms!`, selectedStandard === "fast" ? "⚡" : "🛡️");
     }
 
     btnAction.addEventListener("click", () => executeCryptographicOperation());
@@ -674,11 +730,12 @@ document.addEventListener("DOMContentLoaded", () => {
             const blobObjectUrl = URL.createObjectURL(exportedImageBlob);
             const temporaryDownloadAnchor = document.createElement("a");
             temporaryDownloadAnchor.href = blobObjectUrl;
-            temporaryDownloadAnchor.download = `LockIt_${currentlyActiveSessionMode}_${Date.now()}.webp`;
+            const standardTag = activeSession.encryptionStandard || "secure";
+            temporaryDownloadAnchor.download = `LockIt_${currentlyActiveSessionMode}_${standardTag}_${Date.now()}.webp`;
             temporaryDownloadAnchor.click();
             URL.revokeObjectURL(blobObjectUrl);
             btnDownloadWebP.innerHTML = "<span>💾</span> Download Lossless WebP";
-            showNotificationToast(`Downloaded ${currentlyActiveSessionMode} WebP photo!`, "💾");
+            showNotificationToast(`Downloaded ${currentlyActiveSessionMode} [${standardTag}] WebP photo!`, "💾");
         }, "image/webp", 1.0);
     });
 
@@ -690,11 +747,12 @@ document.addEventListener("DOMContentLoaded", () => {
             const blobObjectUrl = URL.createObjectURL(exportedImageBlob);
             const temporaryDownloadAnchor = document.createElement("a");
             temporaryDownloadAnchor.href = blobObjectUrl;
-            temporaryDownloadAnchor.download = `LockIt_${currentlyActiveSessionMode}_${Date.now()}.png`;
+            const standardTag = activeSession.encryptionStandard || "secure";
+            temporaryDownloadAnchor.download = `LockIt_${currentlyActiveSessionMode}_${standardTag}_${Date.now()}.png`;
             temporaryDownloadAnchor.click();
             URL.revokeObjectURL(blobObjectUrl);
             btnDownloadPNG.innerHTML = "<span>🖼️</span> Download PNG";
-            showNotificationToast(`Downloaded ${currentlyActiveSessionMode} PNG photo!`, "🖼️");
+            showNotificationToast(`Downloaded ${currentlyActiveSessionMode} [${standardTag}] PNG photo!`, "🖼️");
         }, "image/png");
     });
 

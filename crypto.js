@@ -86,8 +86,24 @@ function createChaCha20CSPRNG(keyDigestBytes, nonceWordA = 0, nonceWordB = 0, no
     };
 }
 
+// 32-Bit Mulberry32 PRNG (Fast Mode: Ultra-lightweight and fast)
+function createMulberry32PRNG(initialSeedValue) {
+    let internalSeedState = initialSeedValue >>> 0;
+    return function generateNextRandomFloat() {
+        internalSeedState = (internalSeedState + 0x6D2B79F5) >>> 0;
+        let mixedIntermediateValue = Math.imul(internalSeedState ^ (internalSeedState >>> 15), 1 | internalSeedState);
+        mixedIntermediateValue = (mixedIntermediateValue + Math.imul(mixedIntermediateValue ^ (mixedIntermediateValue >>> 7), 61 | mixedIntermediateValue)) ^ mixedIntermediateValue;
+        return ((mixedIntermediateValue ^ (mixedIntermediateValue >>> 14)) >>> 0) / 4294967296;
+    };
+}
+
 // Backward-compatible alias
-const createPRNG = createChaCha20CSPRNG;
+const createPRNG = (seedOrDigest) => {
+    if (typeof seedOrDigest === "number") {
+        return createMulberry32PRNG(seedOrDigest);
+    }
+    return createChaCha20CSPRNG(seedOrDigest);
+};
 
 // Fisher-Yates shuffle producing Int32Array permutation
 function generatePermutation(totalElementCount, pseudoRandomGenerator) {
@@ -278,9 +294,9 @@ async function computeKeyDigest(unicodeKeyString) {
 }
 
 /**
- * Derives block transformation parameters using full 256-bit ChaCha20 CSPRNG.
+ * Derives block transformation parameters using full 256-bit ChaCha20 CSPRNG (Secure Standard).
  */
-function deriveBlockParameters(unicodeKeyString, sha256KeyDigestBytes, totalImageBlockCount, pixelsPerSquareBlock) {
+function deriveBlockParametersChaCha20(unicodeKeyString, sha256KeyDigestBytes, totalImageBlockCount, pixelsPerSquareBlock) {
     // Expand key to match totalImageBlockCount
     const expandedUnicodeCodePoints = [];
     const unicodeCharacterArray = Array.from(unicodeKeyString);
@@ -333,9 +349,66 @@ function deriveBlockParameters(unicodeKeyString, sha256KeyDigestBytes, totalImag
 }
 
 /**
- * Encrypts an ImageData buffer.
+ * Derives block transformation parameters using 32-bit Mulberry32 PRNG (Fast Standard).
  */
-async function encryptImageData(sourceImageData, unicodeKeyString, squareBlockDimension) {
+function deriveBlockParametersMulberry32(unicodeKeyString, sha256KeyDigestBytes, totalImageBlockCount, pixelsPerSquareBlock) {
+    const digestDataView = new DataView(sha256KeyDigestBytes.buffer, sha256KeyDigestBytes.byteOffset, sha256KeyDigestBytes.byteLength);
+    const masterGlobalSeed32Bit = digestDataView.getUint32(0, false);
+
+    // Expand key to match totalImageBlockCount
+    const expandedUnicodeCodePoints = [];
+    const unicodeCharacterArray = Array.from(unicodeKeyString);
+    for (let blockIndex = 0; blockIndex < totalImageBlockCount; blockIndex++) {
+        expandedUnicodeCodePoints.push(unicodeCharacterArray[blockIndex % unicodeCharacterArray.length].codePointAt(0));
+    }
+
+    // Inter-block spatial permutation using Mulberry32
+    const masterPseudoRandomGenerator = createMulberry32PRNG(masterGlobalSeed32Bit);
+    const interBlockPermutationArray = generatePermutation(totalImageBlockCount, masterPseudoRandomGenerator);
+    const invertedInterBlockPermutationArray = invertPermutation(interBlockPermutationArray);
+
+    // Per-block parameters using Mulberry32
+    const perBlockPixelPermutations = [];
+    const perBlockColorMaskRgb = [];
+    const perBlockPivotColorSwapRules = [];
+
+    for (let blockIndex = 0; blockIndex < totalImageBlockCount; blockIndex++) {
+        const unicodeCharacterCodePoint = expandedUnicodeCodePoints[blockIndex];
+        const uniquePerBlockSeed = (masterGlobalSeed32Bit ^ (unicodeCharacterCodePoint * 1000003 + blockIndex * 2654435761)) >>> 0;
+        const perBlockPseudoRandomGenerator = createMulberry32PRNG(uniquePerBlockSeed);
+
+        perBlockPixelPermutations.push(generatePermutation(pixelsPerSquareBlock, perBlockPseudoRandomGenerator));
+        perBlockColorMaskRgb.push([
+            Math.floor(perBlockPseudoRandomGenerator() * 256),
+            Math.floor(perBlockPseudoRandomGenerator() * 256),
+            Math.floor(perBlockPseudoRandomGenerator() * 256)
+        ]);
+        perBlockPivotColorSwapRules.push((unicodeCharacterCodePoint + sha256KeyDigestBytes[blockIndex % sha256KeyDigestBytes.length]) % 3);
+    }
+
+    return {
+        interBlockPermutationArray,
+        invertedInterBlockPermutationArray,
+        perBlockPixelPermutations,
+        perBlockColorMaskRgb,
+        perBlockPivotColorSwapRules
+    };
+}
+
+/**
+ * Derives block transformation parameters based on chosen standard: 'secure' (default) or 'fast'.
+ */
+function deriveBlockParameters(unicodeKeyString, sha256KeyDigestBytes, totalImageBlockCount, pixelsPerSquareBlock, encryptionStandard = "secure") {
+    if (encryptionStandard === "fast" || encryptionStandard === "mulberry32") {
+        return deriveBlockParametersMulberry32(unicodeKeyString, sha256KeyDigestBytes, totalImageBlockCount, pixelsPerSquareBlock);
+    }
+    return deriveBlockParametersChaCha20(unicodeKeyString, sha256KeyDigestBytes, totalImageBlockCount, pixelsPerSquareBlock);
+}
+
+/**
+ * Encrypts an ImageData buffer. Supports 'secure' (ChaCha20 256-bit) and 'fast' (Mulberry32 32-bit).
+ */
+async function encryptImageData(sourceImageData, unicodeKeyString, squareBlockDimension, encryptionStandard = "secure") {
     const canvasPixelWidth = sourceImageData.width;
     const canvasPixelHeight = sourceImageData.height;
     const verticalBlockCount = Math.floor(canvasPixelHeight / squareBlockDimension);
@@ -349,7 +422,7 @@ async function encryptImageData(sourceImageData, unicodeKeyString, squareBlockDi
         perBlockPixelPermutations,
         perBlockColorMaskRgb,
         perBlockPivotColorSwapRules
-    } = deriveBlockParameters(unicodeKeyString, sha256KeyDigestBytes, totalImageBlockCount, pixelsPerSquareBlock);
+    } = deriveBlockParameters(unicodeKeyString, sha256KeyDigestBytes, totalImageBlockCount, pixelsPerSquareBlock, encryptionStandard);
 
     const sourcePixelBuffer = sourceImageData.data;
     const encryptedPixelBuffer = new Uint8ClampedArray(sourcePixelBuffer.length);
@@ -409,9 +482,9 @@ async function encryptImageData(sourceImageData, unicodeKeyString, squareBlockDi
 }
 
 /**
- * Decrypts an ImageData buffer.
+ * Decrypts an ImageData buffer. Supports 'secure' (ChaCha20 256-bit) and 'fast' (Mulberry32 32-bit).
  */
-async function decryptImageData(encryptedImageData, unicodeKeyString, squareBlockDimension) {
+async function decryptImageData(encryptedImageData, unicodeKeyString, squareBlockDimension, encryptionStandard = "secure") {
     const canvasPixelWidth = encryptedImageData.width;
     const canvasPixelHeight = encryptedImageData.height;
     const verticalBlockCount = Math.floor(canvasPixelHeight / squareBlockDimension);
@@ -425,7 +498,7 @@ async function decryptImageData(encryptedImageData, unicodeKeyString, squareBloc
         perBlockPixelPermutations,
         perBlockColorMaskRgb,
         perBlockPivotColorSwapRules
-    } = deriveBlockParameters(unicodeKeyString, sha256KeyDigestBytes, totalImageBlockCount, pixelsPerSquareBlock);
+    } = deriveBlockParameters(unicodeKeyString, sha256KeyDigestBytes, totalImageBlockCount, pixelsPerSquareBlock, encryptionStandard);
 
     const encryptedPixelBuffer = encryptedImageData.data;
     const decryptedPixelBuffer = new Uint8ClampedArray(encryptedPixelBuffer.length);
@@ -490,18 +563,27 @@ if (typeof window !== "undefined") {
         generateUnicodeKey,
         deriveKeyFromPassphrase,
         encryptImageData,
-        decryptImageData
+        decryptImageData,
+        createMulberry32PRNG,
+        createChaCha20CSPRNG,
+        deriveBlockParametersMulberry32,
+        deriveBlockParametersChaCha20,
+        deriveBlockParameters
     };
 }
 if (typeof module !== "undefined" && module.exports) {
     module.exports = {
         createPRNG,
+        createMulberry32PRNG,
+        createChaCha20CSPRNG,
         generatePermutation,
         invertPermutation,
         getBlockSize,
         generateUnicodeKey,
         deriveKeyFromPassphrase,
         computeKeyDigest,
+        deriveBlockParametersMulberry32,
+        deriveBlockParametersChaCha20,
         deriveBlockParameters,
         encryptImageData,
         decryptImageData

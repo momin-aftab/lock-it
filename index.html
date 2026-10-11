@@ -67,9 +67,28 @@
             </table>
           </fieldset>
 
-          <!-- Step 2: Cryptographic Key -->
+          <!-- Step 2: Cryptographic Key & Standard -->
           <fieldset>
-            <legend>Step 2: Encryption Key</legend>
+            <legend>Step 2: Security & Key</legend>
+
+            <!-- Standard Selector: Secure (256-Bit ChaCha20) vs Fast (32-Bit Mulberry) -->
+            <div style="margin-bottom: 8px; padding-bottom: 7px; border-bottom: 1px dotted #a0a0a0;">
+              <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 5px;">
+                <span style="font-size: 11px; font-weight: bold; color: #333;">Standard / Profile:</span>
+                <span id="standardBadge" style="font-size: 10px; font-family: monospace; background: #e0f2fe; color: #0369a1; padding: 1px 6px; border-radius: 3px; border: 1px solid #bae6fd; font-weight: bold;">256-Bit</span>
+              </div>
+              <div style="display: flex; gap: 14px; align-items: center;">
+                <label style="font-size: 11px; cursor: pointer; display: flex; align-items: center; gap: 4px;" title="RFC 8439 ChaCha20 256-bit CSPRNG — Maximum cryptographic security (2^256 state space)">
+                  <input type="radio" name="standardType" id="radioStandardSecure" value="secure" checked>
+                  <span>🛡️ <strong>Secure</strong> (256-Bit)</span>
+                </label>
+                <label style="font-size: 11px; cursor: pointer; display: flex; align-items: center; gap: 4px;" title="Mulberry32 32-bit PRNG — Ultra-lightweight and lightning fast">
+                  <input type="radio" name="standardType" id="radioStandardFast" value="fast">
+                  <span>⚡ <strong>Fast</strong> (32-Bit)</span>
+                </label>
+              </div>
+            </div>
+
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
               <div style="display: flex; gap: 8px;">
                 <label style="font-size: 11px; cursor: pointer;">
@@ -164,7 +183,7 @@
         <div id="statusGrid" class="status-panel">Grid: —</div>
         <div id="statusSpeed" class="status-panel">Speed: —</div>
         <div class="status-panel">Made by Momin Aftab</div>
-        <div class="status-panel">100% Client-Side 256-Bit E2E</div>
+        <div id="statusStandard" class="status-panel">100% Client-Side 256-Bit E2E</div>
       </div>
     </div>
   </div>
