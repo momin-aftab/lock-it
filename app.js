@@ -430,7 +430,7 @@ document.addEventListener("DOMContentLoaded", () => {
         offscreenCanvas.height = activeSession.fittedImageHeight;
         const offscreenCanvasContext = offscreenCanvas.getContext("2d");
         offscreenCanvasContext.drawImage(
-            loadedHtmlImage, 
+            drawableImageSource, 
             0, 0, activeSession.fittedImageWidth, activeSession.fittedImageHeight, 
             0, 0, activeSession.fittedImageWidth, activeSession.fittedImageHeight
         );
@@ -475,6 +475,7 @@ document.addEventListener("DOMContentLoaded", () => {
         if (fileChangeEvent.target.files && fileChangeEvent.target.files[0]) {
             handleUploadedImageFile(fileChangeEvent.target.files[0]);
         }
+        fileInput.value = "";
     });
 
     // Grid Overlay
